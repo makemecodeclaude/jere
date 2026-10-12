@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'">
+  <title>M31 Planung</title>
+  <meta name="description" content="Schicht- und Arbeitsplanung: tägliche Arbeiten, Wartungsplan und Revision mit Personaleinteilung.">
+  <meta name="theme-color" content="#23272D">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <a class="skip" href="#main">Zum Inhalt springen</a>
+
+  <header class="topbar">
+    <a class="tb-brand" href="#woche"><span class="brand-mark"></span><span class="tb-name" id="tb-name"><b>M31</b> Planung</span></a>
+    <span class="grow"></span>
+    <button class="tb-chip" id="tb-now" title="Zur aktuellen Schicht"></button>
+    <button class="tb-icon" id="tb-gear" aria-label="Einstellungen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" id="rail" aria-label="Bereiche"></nav>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <noscript><p style="padding:24px">Die Planung braucht JavaScript.</p></noscript>
+
+  <script src="js/util.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/xlsx.js"></script>
+  <script src="js/pages.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

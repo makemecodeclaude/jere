@@ -1,0 +1,40 @@
+{
+  "name": "m31-planung",
+  "productName": "M31 Planung",
+  "version": "1.0.0",
+  "description": "Schicht- und Arbeitsplanung: tägliche Arbeiten, Wartungsplan und Revision mit Personaleinteilung.",
+  "main": "electron/main.js",
+  "author": "M31",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "ch.m31.planung",
+    "productName": "M31 Planung",
+    "directories": { "output": "dist" },
+    "files": ["index.html", "css/**", "js/**", "assets/**", "electron/**", "build/icon.png", "package.json"],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "M31 Planung",
+      "artifactName": "M31-Planung-Setup-${version}.exe"
+    },
+    "portable": { "artifactName": "M31-Planung-${version}-portable.exe" }
+  }
+}
