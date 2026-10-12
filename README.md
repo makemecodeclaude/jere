@@ -25,7 +25,10 @@ Die `.exe` wird bei jedem Push automatisch von GitHub Actions auf Windows gebaut
 - `M31-Planung-Setup-1.0.0.exe` – Installer mit Startmenü- und Desktop-Verknüpfung
 - `M31-Planung-1.0.0-portable.exe` – ohne Installation, direkt startbar (z. B. vom USB-Stick)
 
-Wird ein Tag `v*` gepusht (z. B. `v1.0.0`), werden beide Dateien zusätzlich an ein GitHub-Release angehängt.
+Zusätzlich landen beide Dateien in einem öffentlichen GitHub-Release – Download ohne GitHub-Konto:
+**https://github.com/makemecodeclaude/jere/releases/latest**
+
+Für eine neue Version die `version` in `package.json` erhöhen; der nächste Push erstellt dann ein neues Release.
 
 Die Programme sind nicht signiert; Windows SmartScreen zeigt beim ersten Start deshalb einen Hinweis
 («Weitere Informationen» → «Trotzdem ausführen»).
