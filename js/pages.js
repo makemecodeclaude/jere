@@ -20,7 +20,7 @@
     <span><i class="lg lg-wait"></i>Nur bei Stillstand</span>
   </div>`;
   const whoCell = (item, crew) => {
-    const who = item.o.who || [];
+    const who = P.getWho(item.key);
     const ids = [...new Set([...crew, ...who])];
     return `<div class="who">${ids.map((id) => { const p = P.person(id); return p ? `<button class="av-t${who.includes(id) ? ' on' : ''}" data-who="${id}" data-key="${esc(item.key)}" aria-pressed="${who.includes(id)}" title="${esc(p.name)} ${who.includes(id) ? 'entfernen' : 'zuteilen'}">${P.avatar(p)}</button>` : ''; }).join('')}<button class="icon-btn sm" data-who-more="${esc(item.key)}" aria-label="Andere Person zuteilen">${icon('plus')}</button></div>`;
   };
@@ -29,21 +29,18 @@
   function bindWho(root) {
     $$('[data-who]', root).forEach((b) => (b.onclick = () => {
       const k = b.dataset.key, id = b.dataset.who;
-      P.mutate(() => {
-        if (k.startsWith('r|')) { const r = P.db.rev.find((x) => 'r|' + x.id === k); r.who = r.who.includes(id) ? r.who.filter((x) => x !== id) : [...r.who, id]; return; }
-        const who = P.occ(k).who || [];
-        P.setOcc(k, { who: who.includes(id) ? who.filter((x) => x !== id) : [...who, id] });
-      });
+      P.mutate(() => P.setWho(k, P.toggleWithPartner(P.getWho(k), id)));
     }));
     $$('[data-who-more]', root).forEach((b) => (b.onclick = () => {
       const k = b.dataset.whoMore;
-      const cur = k.startsWith('r|') ? P.db.rev.find((x) => 'r|' + x.id === k).who : (P.occ(k).who || []);
-      P.pickStaff(b, cur, (ids) => {
-        if (k.startsWith('r|')) P.db.rev.find((x) => 'r|' + x.id === k).who = ids;
-        else P.setOcc(k, { who: ids });
-      }, { title: 'Zuteilen' });
+      P.pickStaff(b, P.getWho(k), (ids) => P.setWho(k, ids), { title: 'Zuteilen' });
     }));
   }
+
+  /* avatars of a crew, pairs drawn together */
+  const crewHtml = (ids) => P.units(ids).map((u) => u.length > 1 ? `<span class="pair" title="Paar">${u.map((id) => P.avatar(P.person(id))).join('')}</span>` : P.avatar(P.person(u[0]))).join('');
+  P.crewHtml = crewHtml;
+  const shiftHead = (s) => `<div class="wk-c wk-sh">${icon(s.icon)}<b>${s.label}</b><small>${esc(P.shiftTime(s.k))}</small></div>`;
 
   /* ==================================================================== WOCHENPLAN */
   P.pages.woche = function (main) {
@@ -67,15 +64,15 @@
       <div class="wk" role="grid" aria-label="Schichten KW ${w}">
         <div class="wk-c wk-corner">Schicht</div>
         ${days.map((d) => `<div class="wk-c wk-day${d === today ? ' today' : ''}${P.wd(d) % 6 === 0 ? ' we' : ''}"><b>${P.WD[P.wd(d)]}</b><span>${P.fmtShort(d)}</span></div>`).join('')}
-        ${P.SHIFTS.map((s) => `<div class="wk-c wk-sh">${icon(s.icon)}<b>${s.label}</b><small>${s.time}</small></div>${days.map((d) => cell(d, s.k)).join('')}`).join('')}
+        ${P.SHIFTS.map((s) => `${shiftHead(s)}${days.map((d) => cell(d, s.k)).join('')}`).join('')}
       </div>
 
       <div class="cols2">
         <section class="card">
           <div class="card-h"><h2>${icon('wrench')}Wartung KW ${w}</h2><button class="link" data-go="wartung">Wartungsplan →</button></div>
-          ${maint.length ? `<ul class="mlist">${maint.map((m) => `<li class="st-${m.status}">
-            <label class="chk"><input type="checkbox" data-mdone="${esc(m.key)}"${m.o.done ? ' checked' : ''}><span><b>${esc(m.t.desc)}</b><small>${esc(m.t.comp)}${m.t.aid ? ' · ' + esc(m.t.aid) : ''}${m.status === 'late' ? ` · <em>überfällig seit KW ${P.isoWeek(m.week).w}</em>` : ''}${m.t.weekday || m.t.shift ? ` · geplant ${m.t.weekday ? P.WD[m.t.weekday] : ''} ${m.t.shift || ''}` : ''}</small></span></label>
-            <span class="who-s">${(m.o.who || []).map((id) => P.avatar(P.person(id))).join('')}</span></li>`).join('')}</ul>` : '<p class="empty">Diese Woche ist keine Wartung fällig.</p>'}
+          ${maint.length ? `<ul class="mlist">${maint.map((m, x) => `<li class="st-${m.status}">
+            <label class="chk"><input type="checkbox" data-mdone="${x}"${m.o.done ? ' checked' : ''}><span><b>${esc(m.t.desc)}</b><small>${esc(m.t.comp)}${m.t.aid ? ' · ' + esc(m.t.aid) : ''}${m.status === 'late' ? ` · <em>überfällig seit KW ${P.isoWeek(m.week).w}</em>` : ''}${m.comp ? ` · erledigt ${P.fmtShort(m.comp.date)}` : ''}${m.t.weekday || m.t.shift ? ` · geplant ${m.t.weekday ? P.WD[m.t.weekday] : ''} ${m.t.shift || ''}` : ''}</small></span></label>
+            <span class="who-s">${crewHtml(m.o.who || [])}</span></li>`).join('')}</ul>` : '<p class="empty">Diese Woche ist keine Wartung fällig.</p>'}
         </section>
         <section class="card">
           <div class="card-h"><h2>${icon('revision')}Revision diese Woche</h2><button class="link" data-go="revision">Revision →</button></div>
@@ -85,14 +82,14 @@
     </div>`;
 
     function cell(dk, sh) {
-      const st = P.state(dk, sh), crew = P.crew(dk, sh);
-      if (st === 'X') return `<div class="wk-c wk-cell off">${stateChip(st, `data-st="${dk}|${sh}"`)}<span class="muted small">Keine Schicht</span></div>`;
+      const st = P.state(dk, sh), crew = P.crew(dk, sh), grps = P.groupsOn(dk, sh).map((g) => P.groupChip(g)).join('');
+      if (st === 'X') return `<div class="wk-c wk-cell off">${stateChip(st, `data-st="${dk}|${sh}"`)}<span class="muted small">${grps ? grps + ' · ' : ''}Anlage frei</span></div>`;
       const c = P.summary(dk, sh);
       const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
       const tone = c.missed ? 'late' : c.total && c.done === c.total ? 'done' : c.open ? 'due' : 'none';
       return `<div class="wk-c wk-cell st-${st}${dk === today && sh === P.nowShift().sh ? ' now' : ''}">
         <div class="wk-top">${stateChip(st, `data-st="${dk}|${sh}"`)}<button class="icon-btn sm" data-crew="${dk}|${sh}" aria-label="Personal einteilen">${icon('users')}</button></div>
-        <div class="crew">${crew.length ? crew.map((id) => P.avatar(P.person(id))).join('') : '<span class="txt-bad small">Kein Personal</span>'}</div>
+        <div class="crew">${grps}${crew.length ? crewHtml(crew) : '<span class="txt-bad small">Kein Personal</span>'}${P.db.roster[P.slot(dk, sh)] ? '<span class="mod" title="Von Hand angepasst">✎</span>' : ''}</div>
         <button class="wk-open tone-${tone}" data-open="${dk}|${sh}">
           <span class="bar"><i style="width:${pct}%"></i></span>
           <span>${c.done}/${c.total} erledigt${c.missed ? ` · <b>${c.missed} offen</b>` : ''}${c.wait ? ` · ${c.wait} Stillst.` : ''}</span>
@@ -107,7 +104,11 @@
     $$('[data-st]', main).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const [dk, sh] = b.dataset.st.split('|'); setState(dk, sh, nextState(P.state(dk, sh))); }));
     $$('[data-open]', main).forEach((b) => (b.onclick = () => { const [dk, sh] = b.dataset.open.split('|'); P.go('schicht', { date: dk, shift: sh }); }));
     $$('[data-crew]', main).forEach((b) => (b.onclick = () => crewPicker(b, ...b.dataset.crew.split('|'))));
-    $$('[data-mdone]', main).forEach((i) => (i.onchange = () => P.mutate(() => P.setOcc(i.dataset.mdone, { done: i.checked, at: i.checked ? P.stamp() : '' }))));
+    $$('[data-mdone]', main).forEach((i) => (i.onchange = () => {
+      const m = maint[i.dataset.mdone];
+      const day = P.dayNum(days[0]) > P.dayNum(today) || days.includes(today) ? today : days[0];
+      P.mutate(() => P.toggleItem(m, i.checked, day, ''));
+    }));
     $('#w-copy').onclick = () => P.mutate((db) => {
       for (const d of days) for (const s of P.SHIFTS) {
         const src = P.slot(P.addDays(d, -7), s.k), dst = P.slot(d, s.k);
@@ -126,22 +127,23 @@
   function crewPicker(anchor, dk, sh) {
     P.pickStaff(anchor, P.crew(dk, sh), (ids) => { P.db.roster[P.slot(dk, sh)] = ids; }, {
       title: `${P.WD[P.wd(dk)]} ${P.fmtShort(dk)} · ${P.SHIFT[sh].label}`,
-      reset: P.db.settings.autoRoster ? 'Standard nach Schichtgruppe' : null,
+      reset: P.db.roster[P.slot(dk, sh)] ? 'Zurück zur Schichtgruppe' : null,
       onReset: () => P.mutate((db) => delete db.roster[P.slot(dk, sh)]),
     });
   }
 
   function exportWeek(days, w) {
-    const rows = [['Datum', 'Tag', 'Schicht', 'Anlage', 'Personal', 'Art', 'Komponente', 'Aufgabe', 'Std.', 'MA', 'S/B', 'Zugeteilt', 'Status']];
+    const rows = [['Datum', 'Tag', 'Schicht', 'Zeit', 'Gruppe', 'Anlage', 'Personal', 'Art', 'Komponente', 'Aufgabe', 'Std.', 'MA', 'S/B', 'Zugeteilt', 'Status']];
     const stTxt = { done: 'erledigt', due: 'offen', wait: 'nur bei Stillstand', late: 'überfällig', week: 'diese Woche' };
     for (const d of days) for (const s of P.SHIFTS) {
       const st = P.state(d, s.k);
       if (st === 'X') continue;
       const crew = P.crew(d, s.k).map((id) => P.person(id)?.name).filter(Boolean).join(', ');
       const items = P.shiftItems(d, s.k).filter((i) => i.kind !== 'maint' || i.status === 'due' || (i.status === 'done' && i.o.slot === P.slot(d, s.k)));
-      if (!items.length) rows.push([P.fmtShort(d), P.WD[P.wd(d)], s.k, P.STATES[st], crew, '', '', '', '', '', '', '', '']);
+      const head = [P.fmtShort(d), P.WD[P.wd(d)], s.k, P.shiftTime(s.k), P.groupsOn(d, s.k).map((g) => P.group(g).name).join(', '), P.STATES[st], crew];
+      if (!items.length) rows.push([...head, '', '', '', '', '', '', '', '']);
       for (const i of items) {
-        rows.push([P.fmtShort(d), P.WD[P.wd(d)], s.k, P.STATES[st], crew, { daily: 'Täglich', maint: 'Wartung', rev: 'Revision' }[i.kind],
+        rows.push([...head, { daily: 'Täglich', maint: 'Wartung', rev: 'Revision' }[i.kind],
           i.kind === 'daily' ? '' : i.t.comp, i.kind === 'daily' ? i.t.name : i.kind === 'maint' ? i.t.desc : 'Revision',
           i.std ?? '', i.ma ?? '', i.t.sb || '', (i.o.who || []).map((id) => P.person(id)?.name).filter(Boolean).join(', '), stTxt[i.status]]);
       }
@@ -156,11 +158,13 @@
     const daily = items.filter((i) => i.kind === 'daily');
     const maint = items.filter((i) => i.kind === 'maint');
     const rev = items.filter((i) => i.kind === 'rev');
+    const early = st === 'X' ? [] : P.upcomingMaint(dk);
+    const all = items.concat(early);
     const { w } = P.isoWeek(dk);
     const open = items.filter((i) => i.status === 'due' || i.status === 'late').length;
 
     const row = (i, cells) => `<tr class="st-${i.status}">
-      <td class="t-chk"><input type="checkbox" data-done="${esc(i.key)}"${i.o.done ? ' checked' : ''} aria-label="Erledigt"${i.status === 'wait' ? ' title="Nur bei Stillstand"' : ''}></td>
+      <td class="t-chk"><input type="checkbox" data-done="${all.indexOf(i)}"${i.o.done ? ' checked' : ''} aria-label="Erledigt"${i.status === 'wait' ? ' title="Nur bei Stillstand"' : ''}></td>
       ${cells}
       <td class="num">${i.std ? P.hrs(i.std) : '–'}</td><td class="num">${i.ma || 1}</td><td><span class="sb sb-${i.t.sb}" title="${SB[i.t.sb]}">${i.t.sb}</span></td>
       <td>${whoCell(i, crew)}</td></tr>`;
@@ -168,7 +172,7 @@
     main.innerHTML = `<div class="page">
       <div class="page-h">
         <div><p class="eyebrow">Tägliche Arbeiten ${esc(P.db.settings.line)}</p><h1>${P.fmtLong(dk)}</h1>
-          <p class="lead">KW ${w} · ${P.SHIFT[sh].label} ${P.SHIFT[sh].time} Uhr · ${st === 'X' ? 'keine Schicht' : open ? `<b>${open} offen</b>` : 'alles erledigt'}</p></div>
+          <p class="lead">KW ${w} · ${P.SHIFT[sh].label} ${esc(P.shiftTime(sh))} Uhr${P.groupsOn(dk, sh).length ? ' · ' + P.groupsOn(dk, sh).map((g) => esc(P.group(g).name)).join(', ') : ''} · ${st === 'X' ? 'keine Schicht' : open ? `<b>${open} offen</b>` : 'alles erledigt'}</p></div>
         <div class="page-h-r">
           <div class="daynav"><button class="icon-btn" id="s-prev" aria-label="Vorherige Schicht">${icon('chevL')}</button>
             <label class="date-btn">${icon('today')}<input type="date" id="s-date" value="${dk}" aria-label="Datum"></label>
@@ -181,7 +185,7 @@
 
       <div class="shift-bar">
         <div class="sb-i"><small>Anlage</small>${stateChip(st, 'id="s-state"')}</div>
-        <div class="sb-i grow"><small>Personal</small><div class="crew big">${crew.map((id) => { const p = P.person(id); return p ? `<span class="crew-p">${P.avatar(p)}<span>${esc(p.name)}<em>${P.hrs(P.personHours(id, items))}</em></span></span>` : ''; }).join('') || '<span class="txt-bad">Niemand eingeteilt</span>'}
+        <div class="sb-i grow"><small>Personal</small><div class="crew big">${P.units(crew).map((u) => `<span class="crew-u${u.length > 1 ? ' is-pair' : ''}">${u.map((id) => { const p = P.person(id); return p ? `<span class="crew-p">${P.avatar(p)}<span>${esc(p.name)}<em>${P.hrs(P.personHours(id, items))}</em></span></span>` : ''; }).join(u.length > 1 ? `<span class="pair-link" title="Paar">${icon('link')}</span>` : '')}</span>`).join('') || '<span class="txt-bad">Niemand eingeteilt</span>'}
           <button class="btn btn-ghost sm" id="s-crew">${icon('users')}Einteilen</button></div></div>
         <div class="sb-i"><small>&nbsp;</small><button class="btn btn-primary" id="s-auto"${!crew.length || st === 'X' ? ' disabled' : ''}>${icon('wand')}Automatisch verteilen</button></div>
       </div>
@@ -197,8 +201,14 @@
       <h2 class="h2">${icon('wrench')}Wartung KW ${w} <span class="count">${maint.length}</span><small>fällig diese Woche – auf einer beliebigen Schicht erledigen</small></h2>
       ${maint.length ? `<div class="tbl-wrap"><table class="tbl plan">
         <thead><tr><th class="t-chk">✓</th><th>Komponente</th><th>Beschreibung</th><th>Hilfsmittel</th><th>Zyklus</th><th class="num">Std.</th><th class="num">MA</th><th>S/B</th><th>Zugeteilt</th></tr></thead>
-        <tbody>${maint.map((i) => row(i, `<td>${esc(i.t.comp)}</td><td><b>${esc(i.t.desc)}</b>${i.status === 'late' ? `<small class="block txt-bad">überfällig seit KW ${P.isoWeek(i.week).w}</small>` : ''}${i.t.weekday || i.t.shift ? `<small class="block muted">geplant ${i.t.weekday ? P.WDL[i.t.weekday] : ''} ${i.t.shift ? P.SHIFT[i.t.shift].label : ''}</small>` : ''}${i.o.done && i.o.at ? `<small class="block muted">erledigt ${esc(i.o.at)}</small>` : ''}${i.t.needWeight ? `<label class="weight">Gewicht <input type="number" step="0.1" min="0" data-weight="${esc(i.key)}" value="${i.o.weight ?? ''}"> kg</label>` : ''}</td><td class="muted">${esc(i.t.aid || '')}</td><td class="nowrap">${P.cycleLabel(i.t)}</td>`)).join('')}</tbody>
+        <tbody>${maint.map((i) => row(i, `<td>${esc(i.t.comp)}</td><td><b>${esc(i.t.desc)}</b>${i.status === 'late' ? `<small class="block txt-bad">überfällig seit KW ${P.isoWeek(i.week).w}</small>` : ''}${i.t.weekday || i.t.shift ? `<small class="block muted">geplant ${i.t.weekday ? P.WDL[i.t.weekday] : ''} ${i.t.shift ? P.SHIFT[i.t.shift].label : ''}</small>` : ''}${i.comp ? `<small class="block muted">erledigt ${P.fmtDate(i.comp.date)} · nächste Fälligkeit KW ${P.isoWeek(P.nextDue(i.t)).w}</small>` : ''}${i.t.needWeight ? `<label class="weight">Gewicht <input type="number" step="0.1" min="0" data-weight="${all.indexOf(i)}" value="${i.o.weight ?? ''}"> kg</label>` : ''}</td><td class="muted">${esc(i.t.aid || '')}</td><td class="nowrap">${P.cycleLabel(i.t)}</td>`)).join('')}</tbody>
       </table></div>` : '<p class="empty">Diese Woche ist keine Wartung fällig.</p>'}
+
+      ${early.length ? `<details class="early"${P.ui.earlyOpen ? ' open' : ''}><summary><h2 class="h2">${icon('wrench')}Vorziehen möglich <span class="count">${early.length}</span><small>in den nächsten 2 Wochen fällig – wird es jetzt erledigt, beginnt der Zyklus ab heute neu</small></h2></summary>
+        <div class="tbl-wrap"><table class="tbl plan">
+        <thead><tr><th class="t-chk">✓</th><th>Komponente</th><th>Beschreibung</th><th>Hilfsmittel</th><th>Geplant</th><th class="num">Std.</th><th class="num">MA</th><th>S/B</th><th>Zugeteilt</th></tr></thead>
+        <tbody>${early.map((i) => row(i, `<td>${esc(i.t.comp)}</td><td><b>${esc(i.t.desc)}</b></td><td class="muted">${esc(i.t.aid || '')}</td><td class="nowrap">KW ${P.isoWeek(i.week).w} · ${P.cycleLabel(i.t)}</td>`)).join('')}</tbody>
+      </table></div></details>` : ''}
 
       ${rev.length ? `<h2 class="h2">${icon('revision')}Revision</h2><div class="tbl-wrap"><table class="tbl plan"><tbody>${rev.map((i) => `<tr class="st-${i.status}"><td><b>${esc(i.t.comp)}</b><small class="block muted">${i.progress[0]}/${i.progress[1]} Punkte erledigt${i.status === 'wait' ? ' · Anlage muss im Stillstand sein' : ''}</small></td><td>${whoCell(i, crew)}</td><td class="t-act"><button class="btn btn-soft sm" data-go-rev="${i.t.id}">Checkliste öffnen</button></td></tr>`).join('')}</tbody></table></div>` : ''}
       `}
@@ -219,8 +229,12 @@
     $('#s-state').onclick = () => setState(dk, sh, nextState(st));
     $('#s-crew').onclick = (e) => crewPicker(e.currentTarget, dk, sh);
     $('#s-auto').onclick = () => { let n = 0; P.mutate(() => { n = P.autoAssign(dk, sh); }); P.toast(n ? `${n} Aufgaben verteilt.` : 'Alle offenen Aufgaben sind bereits zugeteilt.'); };
-    $$('[data-done]', main).forEach((c) => (c.onchange = () => P.mutate(() => P.setOcc(c.dataset.done, { done: c.checked, at: c.checked ? P.stamp() : '', slot: c.checked ? P.slot(dk, sh) : '' }))));
-    $$('[data-weight]', main).forEach((i) => (i.onchange = () => P.mutate(() => P.setOcc(i.dataset.weight, { weight: i.value === '' ? null : Number(i.value) }), 'Gewicht gespeichert.')));
+    $$('[data-done]', main).forEach((c) => (c.onchange = () => {
+      const it = all[c.dataset.done];
+      P.mutate(() => P.toggleItem(it, c.checked, dk, sh), it.kind === 'maint' && c.checked ? `Erledigt – nächste Fälligkeit wird ab ${P.fmtShort(dk)} berechnet.` : null);
+    }));
+    $$('[data-weight]', main).forEach((i) => (i.onchange = () => P.mutate(() => P.setWeight(all[i.dataset.weight], i.value === '' ? null : Number(i.value)), 'Gewicht gespeichert.')));
+    const det = $('details.early', main); if (det) det.ontoggle = () => { P.ui.earlyOpen = det.open; P.saveUi(); };
     $$('[data-go-rev]', main).forEach((b) => (b.onclick = () => { P.ui.revFocus = b.dataset.goRev; P.go('revision'); }));
     bindWho(main);
   };
@@ -232,11 +246,12 @@
     const nowMon = P.monday(P.today());
     const rows = P.db.maint;
     const late = P.weekMaint(P.today()).filter((m) => m.status === 'late');
+    const cells = [];
 
     main.innerHTML = `<div class="page">
       <div class="page-h">
         <div><p class="eyebrow">Arbeits- und Wartungsplan ${esc(P.db.settings.line)}</p><h1>Wartungsplan</h1>
-          <p class="lead">Gelb = in dieser KW fällig, grün = erledigt, rot = überfällig. Feld anklicken, um es abzuhaken.</p></div>
+          <p class="lead">Gelb = fällig, grün = erledigt, rot = überfällig, gestrichelt = voraussichtlich. Feld anklicken zum Eintragen. Wird eine Arbeit früher oder später erledigt, beginnt der Zyklus ab diesem Datum neu.</p></div>
         <div class="page-h-r">
           <div class="daynav"><button class="icon-btn" id="m-prev" aria-label="Früher">${icon('chevL')}</button><button class="btn btn-ghost sm" id="m-today">Aktuelle KW</button><button class="icon-btn" id="m-next" aria-label="Später">${icon('chevR')}</button></div>
           <button class="btn btn-ghost" id="m-add">${icon('plus')}Wartungsarbeit</button>
@@ -245,18 +260,21 @@
       </div>
       ${late.length ? `<div class="banner tone-bad">${icon('alert')}<span><b>${late.length} überfällig:</b> ${late.map((m) => esc(m.t.desc)).join(' · ')}</span></div>` : ''}
       <div class="tbl-wrap"><table class="tbl mplan">
-        <thead><tr><th>Komponente</th><th>Beschreibung</th><th>Hilfsmittel / Beschreibung</th><th>Zyklus</th><th class="num">KW Start</th><th>Wann</th><th class="num">Std.</th><th class="num">MA</th><th>S/B</th>
+        <thead><tr><th>Komponente</th><th>Beschreibung</th><th>Hilfsmittel / Beschreibung</th><th>Zyklus</th><th class="num">KW Start</th><th>Nächste</th><th>Wann</th><th class="num">Std.</th><th class="num">MA</th><th>S/B</th>
           ${weeks.map((wk) => `<th class="kw${wk === nowMon ? ' now' : ''}">KW ${P.isoWeek(wk).w}<small>${P.fmtShort(wk)}</small></th>`).join('')}</tr></thead>
         <tbody>${rows.map((t) => `<tr>
           <td class="nowrap">${esc(t.comp)}</td><td><button class="link" data-edit="${t.id}">${esc(t.desc)}</button></td><td class="muted">${esc(t.aid || '')}</td>
-          <td class="nowrap">${P.cycleShort(t)}</td><td class="num">${t.kw}</td>
+          <td class="nowrap">${P.cycleShort(t)}</td><td class="num">${t.kw}</td><td class="nowrap"><b>KW ${P.isoWeek(P.nextDue(t)).w}</b></td>
           <td class="nowrap small">${t.weekday || t.shift ? `${t.weekday ? P.WD[t.weekday] : ''} ${t.shift || ''}` : '<span class="muted">flexibel</span>'}</td>
           <td class="num">${t.std ? P.hrs(t.std) : '–'}</td><td class="num">${t.ma || 1}</td><td><span class="sb sb-${t.sb}">${t.sb}</span></td>
           ${weeks.map((wk) => {
-            if (!P.maintDue(t, P.absWeek(wk))) return `<td class="kc${wk === nowMon ? ' now' : ''}"></td>`;
-            const k = P.kMaint(t, wk), o = P.occ(k);
-            const s = o.done ? 'done' : P.dayNum(wk) >= P.dayNum(nowMon) ? 'due' : P.tracked(wk) ? 'late' : 'past';
-            return `<td class="kc${wk === nowMon ? ' now' : ''}"><button class="kbtn st-${s}" data-k="${esc(k)}" title="${esc(t.desc)} · KW ${P.isoWeek(wk).w}: ${s === 'done' ? 'erledigt ' + (o.at || '') : s === 'late' ? 'überfällig' : s === 'past' ? 'vor Beginn der Planung' : 'fällig'}${o.weight != null ? ' · ' + o.weight + ' kg' : ''}">${s === 'done' ? icon('check') : ''}${o.who && o.who.length ? `<i>${o.who.map((id) => esc(P.person(id)?.short || '')).join(' ')}</i>` : ''}</button></td>`;
+            const its = P.maintInWeek(t, wk);
+            const it = its.find((x) => x.status === 'done') || its[0];
+            if (!it) return `<td class="kc${wk === nowMon ? ' now' : ''}"></td>`;
+            cells.push(it);
+            const s = it.status, o = it.o;
+            const tip = s === 'done' ? `erledigt ${P.fmtDate(it.comp.date)}` : s === 'late' ? `überfällig seit KW ${P.isoWeek(it.week).w}` : it.proj ? 'voraussichtlich fällig' : 'fällig';
+            return `<td class="kc${wk === nowMon ? ' now' : ''}"><button class="kbtn st-${s}${it.proj ? ' proj' : ''}" data-cell="${cells.length - 1}" title="${esc(t.desc)} · KW ${P.isoWeek(wk).w}: ${tip}${o.weight != null ? ' · ' + o.weight + ' kg' : ''}">${s === 'done' ? icon('check') : ''}${o.who && o.who.length ? `<i>${o.who.map((id) => esc(P.person(id)?.short || '')).join(' ')}</i>` : ''}</button></td>`;
           }).join('')}
         </tr>`).join('') || `<tr><td colspan="${9 + weeks.length}" class="empty">Noch keine Wartungsarbeiten erfasst.</td></tr>`}</tbody>
       </table></div>
@@ -267,9 +285,24 @@
     $('#m-today').onclick = () => { P.ui.wDate = null; P.render(); };
     $('#m-add').onclick = () => P.editMaint();
     $$('[data-edit]', main).forEach((b) => (b.onclick = () => P.editMaint(P.db.maint.find((t) => t.id === b.dataset.edit))));
-    $$('[data-k]', main).forEach((b) => (b.onclick = () => {
-      const k = b.dataset.k, done = !P.occ(k).done;
-      P.mutate(() => P.setOcc(k, { done, at: done ? P.stamp() : '' }));
+    $$('[data-cell]', main).forEach((b) => (b.onclick = () => {
+      const it = cells[b.dataset.cell], t = it.t;
+      if (it.comp) {
+        P.pop(b, `<div class="pop-h">${esc(t.desc)}</div><div class="pop-b"><p>Erledigt am <b>${P.fmtDate(it.comp.date)}</b>${(it.comp.who || []).length ? ' von ' + it.comp.who.map((id) => esc(P.person(id)?.name || '')).join(', ') : ''}.</p><p class="muted small">Nächste Fälligkeit: KW ${P.isoWeek(P.nextDue(t)).w}</p></div><div class="pop-f"><button class="btn btn-ghost sm" data-undo>Rückgängig</button></div>`, (el) => {
+          el.querySelector('[data-undo]').onclick = () => P.mutate(() => P.uncompleteMaint(t, it.comp), 'Eintrag entfernt.', true);
+        });
+        return;
+      }
+      const early = P.dayNum(P.today()) < P.dayNum(it.week);
+      P.pop(b, `<div class="pop-h">${esc(t.desc)}</div><div class="pop-b">
+          <label class="fld"><span>Erledigt am</span><input type="date" id="pd-date" value="${P.today()}"></label>
+          <p class="muted small">${early ? `Geplant für KW ${P.isoWeek(it.week).w}. ` : ''}Der Zyklus (${P.cycleLabel(t)}) beginnt ab diesem Datum neu.</p></div>
+        <div class="pop-f"><button class="btn btn-primary sm" data-ok>${icon('check')}Als erledigt eintragen</button></div>`, (el) => {
+        el.querySelector('[data-ok]').onclick = () => {
+          const d = el.querySelector('#pd-date').value || P.today();
+          P.mutate(() => P.completeMaint(t, d, '', it.key), `Erledigt – nächste Fälligkeit KW ${P.isoWeek(P.cycleAdd(t, d)).w}.`, true);
+        };
+      });
     }));
   };
 
@@ -320,10 +353,68 @@
     if (P.ui.revFocus) { const el = $('#rev-' + P.ui.revFocus); P.ui.revFocus = null; if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('flash'); } }
   };
 
+  /* ==================================================================== MONAT */
+  P.pages.monat = function (main) {
+    const ref = P.parse(P.ui.mDate || P.today());
+    const first = P.dk(new Date(ref.getFullYear(), ref.getMonth(), 1, 12));
+    const last = P.dk(new Date(ref.getFullYear(), ref.getMonth() + 1, 0, 12));
+    const weeks = [];
+    for (let m = P.monday(first); P.dayNum(m) <= P.dayNum(last); m = P.addDays(m, 7)) weeks.push(m);
+    const today = P.today(), month = ref.getMonth();
+    const L = Object.assign({ F: true, S: true, N: true, A: true, B: true, C: true, D: true, maint: true, rev: true }, P.ui.layers || {});
+    const toggle = (k, label, extra = '') => `<label class="tg${L[k] ? ' on' : ''}"${extra}><input type="checkbox" data-layer="${k}"${L[k] ? ' checked' : ''}><span>${label}</span></label>`;
+    const maintCells = [];
+
+    const dayCell = (d) => {
+      const out = P.parse(d).getMonth() !== month;
+      const rows = !out ? P.SHIFTS.filter((x) => L[x.k]).map((x) => {
+        const st = P.state(d, x.k), gs = P.groupsOn(d, x.k).filter((g) => L[g]);
+        return `<div class="mrow st-${st}" title="${x.label} ${esc(P.shiftTime(x.k))} · ${P.STATES[st]}"><i>${x.k}</i>${st === 'X' ? '<span class="muted">–</span>' : gs.map((g) => P.groupChip(g, true)).join('')}${st === 'S' ? '<em>Stillstand</em>' : ''}</div>`;
+      }).join('') : '';
+      const revs = !out && L.rev ? P.db.rev.filter((r) => r.date === d).map((r) => `<button class="mchip rev st-${r.doneAt ? 'done' : 'due'}" data-rev="${r.id}" title="Revision${r.shift ? ' · ' + P.SHIFT[r.shift].label : ''}">${icon('revision')}${esc(r.comp)}</button>`).join('') : '';
+      return `<div class="mday${out ? ' out' : ''}${d === today ? ' today' : ''}${P.wd(d) % 6 === 0 ? ' we' : ''}">
+        <button class="mnum" data-day="${d}" title="Woche öffnen">${P.parse(d).getDate()}</button>${rows}${revs}</div>`;
+    };
+    const maintStrip = (mon) => {
+      if (!L.maint) return '';
+      const its = P.weekMaint(mon);
+      return `<div class="mstrip">${its.length ? its.map((it) => { maintCells.push([it, mon]); return `<button class="mchip st-${it.status}${it.proj ? ' proj' : ''}" data-mc="${maintCells.length - 1}" title="${esc(it.t.comp)} · ${it.status === 'done' ? 'erledigt ' + P.fmtShort(it.comp.date) : it.status === 'late' ? 'überfällig' : it.proj ? 'voraussichtlich' : 'fällig'}">${it.status === 'done' ? icon('check') : icon('wrench')}${esc(it.t.desc)}${it.t.weekday ? ` <small>${P.WD[it.t.weekday]}</small>` : ''}</button>`; }).join('') : '<span class="muted small">keine Wartung</span>'}</div>`;
+    };
+
+    main.innerHTML = `<div class="page">
+      <div class="page-h">
+        <div><p class="eyebrow">Monatsübersicht ${esc(P.db.settings.line)}</p><h1>${['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'][month]} ${ref.getFullYear()}</h1></div>
+        <div class="page-h-r">
+          <div class="daynav"><button class="icon-btn" id="mo-prev" aria-label="Vorheriger Monat">${icon('chevL')}</button><button class="btn btn-ghost sm" id="mo-today">Heute</button><button class="icon-btn" id="mo-next" aria-label="Nächster Monat">${icon('chevR')}</button></div>
+          <button class="btn btn-ghost" onclick="print()">${icon('print')}Drucken</button>
+        </div>
+      </div>
+      <div class="layers" role="group" aria-label="Ein- und ausblenden">
+        <span class="lyr-l">Schichten</span>${P.SHIFTS.map((x) => toggle(x.k, `${icon(x.icon)}${x.label}`)).join('')}
+        <span class="lyr-l">Gruppen</span>${P.db.settings.groups.map((g) => toggle(g.id, `<i class="dot" style="--c:${esc(g.color)}"></i>${esc(g.name)}`)).join('')}
+        <span class="lyr-l">Arbeiten</span>${toggle('maint', `${icon('wrench')}Wartung`)}${toggle('rev', `${icon('revision')}Revision`)}
+      </div>
+      <div class="mon">
+        <div class="mh">KW</div>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<div class="mh">${P.WDL[d]}</div>`).join('')}
+        ${weeks.map((mon) => `<button class="mkw${mon === P.monday(today) ? ' now' : ''}${L.maint ? '' : ' one'}" data-week="${mon}" title="Wochenplan öffnen">KW<b>${P.isoWeek(mon).w}</b></button>${[...Array(7)].map((_, i) => dayCell(P.addDays(mon, i))).join('')}${maintStrip(mon)}`).join('')}
+      </div>
+    </div>`;
+
+    const go = (n) => { const d = new Date(ref.getFullYear(), ref.getMonth() + n, 1, 12); P.ui.mDate = P.dk(d); P.render(); };
+    $('#mo-prev').onclick = () => go(-1);
+    $('#mo-next').onclick = () => go(1);
+    $('#mo-today').onclick = () => { P.ui.mDate = null; P.render(); };
+    $$('[data-layer]', main).forEach((c) => (c.onchange = () => { P.ui.layers = Object.assign({}, L, { [c.dataset.layer]: c.checked }); P.render(); }));
+    $$('[data-day]', main).forEach((b) => (b.onclick = () => P.go('woche', { date: b.dataset.day })));
+    $$('[data-week]', main).forEach((b) => (b.onclick = () => P.go('woche', { date: b.dataset.week })));
+    $$('[data-rev]', main).forEach((b) => (b.onclick = () => { P.ui.revFocus = b.dataset.rev; P.go('revision'); }));
+    $$('[data-mc]', main).forEach((b) => (b.onclick = () => { P.ui.wDate = maintCells[b.dataset.mc][1]; P.go('wartung'); }));
+  };
+
   /* ==================================================================== TEAM */
   P.pages.team = function (main) {
     const mon = P.monday(P.ui.date), days = [...Array(7)].map((_, i) => P.addDays(mon, i));
-    const { w } = P.isoWeek(mon), s = P.db.settings;
+    const { w } = P.isoWeek(mon), s = P.db.settings, today = P.today();
     const stats = Object.fromEntries(P.db.staff.map((p) => [p.id, { shifts: 0, tasks: 0, hrs: 0 }]));
     for (const d of days) for (const sh of P.SHIFTS) {
       if (P.state(d, sh.k) === 'X') continue;
@@ -331,52 +422,81 @@
       for (const id of P.crew(d, sh.k)) if (stats[id]) stats[id].shifts++;
       for (const i of items) for (const id of i.o.who || []) if (stats[id] && (i.kind !== 'maint' || i.status !== 'week')) { stats[id].tasks++; stats[id].hrs += (i.std || 0.25) / i.o.who.length; }
     }
+    const nowTxt = (g) => { const c = P.groupShift(g, today); return c === '-' ? 'frei' : P.SHIFT[c].label; };
+    const groupCard = (g) => {
+      const members = P.db.staff.filter((p) => p.group === g.id);
+      return `<section class="gcard" style="--c:${esc(g.color)}">
+        <header><b>${esc(g.name)}</b><span class="muted small">heute: ${nowTxt(g.id)}</span></header>
+        <div class="gstrip">${days.map((d) => { const c = P.groupShift(g.id, d); return `<span class="rc rc-${c === '-' ? 'X' : c}${d === today ? ' today' : ''}" title="${P.WD[P.wd(d)]} ${P.fmtShort(d)}">${c === '-' ? '' : c}</span>`; }).join('')}</div>
+        <div class="gmem">${P.units(members.map((m) => m.id)).map((u) => `<div class="gunit${u.length > 1 ? ' is-pair' : ''}">${u.map((id) => { const p = P.person(id); return `<button class="gp" data-pedit="${p.id}" title="Bearbeiten">${P.avatar(p)}<span>${esc(p.name)}</span></button>`; }).join(u.length > 1 ? `<span class="pair-link" title="Paar">${icon('link')}</span>` : '')}</div>`).join('') || '<p class="muted small">Noch niemand in dieser Gruppe.</p>'}</div>
+      </section>`;
+    };
+    const free = P.db.staff.filter((p) => !p.group);
 
     main.innerHTML = `<div class="page">
       <div class="page-h">
-        <div><p class="eyebrow">Team ${esc(s.line)}</p><h1>Mitarbeitende</h1><p class="lead">Die Schichtgruppe bestimmt, wer standardmässig auf welcher Schicht eingeteilt ist. Einzelne Schichten passt du im Wochenplan an.</p></div>
-        <div class="page-h-r"><button class="btn btn-primary" id="t-add">${icon('plus')}Person erfassen</button></div>
+        <div><p class="eyebrow">Team ${esc(s.line)}</p><h1>Schichtgruppen</h1><p class="lead">Jede Person gehört einer der 4 Gruppen an. Wer meist zusammenarbeitet, wird als Paar verbunden: Paare werden gemeinsam eingeteilt und bekommen ihre Aufgaben zusammen.</p></div>
+        <div class="page-h-r"><button class="btn btn-ghost" id="t-rhythm">${icon('gear')}Rhythmus & Zeiten</button><button class="btn btn-primary" id="t-add">${icon('plus')}Person erfassen</button></div>
       </div>
-      <section class="card opts">
-        <label class="chk"><input type="checkbox" id="t-auto"${s.autoRoster ? ' checked' : ''}><span><b>Automatisch nach Schichtgruppe einteilen</b><small class="block muted">Wer der Gruppe F, S oder N angehört, erscheint auf jeder aktiven Schicht dieser Gruppe.</small></span></label>
-        <label class="chk"><input type="checkbox" id="t-rot"${s.rotate ? ' checked' : ''}${s.autoRoster ? '' : ' disabled'}><span><b>Schichtgruppen wöchentlich rotieren</b><small class="block muted">Jede Woche wechselt die Gruppe: Früh → Spät → Nacht.</small></span></label>
-      </section>
+      <div class="ggrid">${s.groups.map(groupCard).join('')}</div>
+      ${free.length ? `<p class="muted small" style="margin-top:12px">Ohne Gruppe (nur von Hand einteilbar): ${free.map((p) => `<button class="link" data-pedit="${p.id}">${esc(p.name)}</button>`).join(', ')}</p>` : ''}
+
+      <h2 class="h2">${icon('users')}Übersicht KW ${w}</h2>
       <div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th></th><th>Name</th><th>Schichtgruppe</th><th class="num">Schichten KW ${w}</th><th class="num">Aufgaben KW ${w}</th><th class="num">Std. (geschätzt)</th><th></th></tr></thead>
-        <tbody>${P.db.staff.map((p) => `<tr>
+        <thead><tr><th></th><th>Name</th><th>Gruppe</th><th>Partner/in</th><th class="num">Schichten KW ${w}</th><th class="num">Aufgaben KW ${w}</th><th class="num">Std. (geschätzt)</th><th></th></tr></thead>
+        <tbody>${P.db.staff.slice().sort((a, b) => (a.group || 'Z').localeCompare(b.group || 'Z')).map((p) => { const pt = P.partnerOf(p.id); return `<tr>
           <td style="width:44px">${P.avatar(p)}</td><td><b>${esc(p.name)}</b></td>
-          <td>${p.group ? `${P.SHIFT[p.group].label}${s.rotate ? ` <small class="muted">(KW ${w}: ${P.groupFor(p, mon)})</small>` : ''}` : '<span class="muted">keine (nur manuell)</span>'}</td>
+          <td>${p.group ? P.groupChip(p.group) : '<span class="muted">keine</span>'}</td>
+          <td>${pt ? `${P.avatar(pt)} ${esc(pt.name)}` : '<span class="muted">–</span>'}</td>
           <td class="num">${stats[p.id].shifts}</td><td class="num">${stats[p.id].tasks}</td><td class="num">${P.hrs(stats[p.id].hrs)}</td>
           <td class="t-act"><button class="icon-btn sm" data-pedit="${p.id}" aria-label="Bearbeiten">${icon('edit')}</button><button class="icon-btn sm" data-pdel="${p.id}" aria-label="Löschen">${icon('trash')}</button></td>
-        </tr>`).join('') || '<tr><td colspan="7" class="empty">Noch niemand erfasst.</td></tr>'}</tbody>
+        </tr>`; }).join('') || '<tr><td colspan="8" class="empty">Noch niemand erfasst.</td></tr>'}</tbody>
       </table></div>
       <p class="muted small">Für Aufgaben ohne Std.-Angabe werden 15 Minuten gerechnet.</p>
     </div>`;
 
     $('#t-add').onclick = () => editPerson();
-    $('#t-auto').onchange = (e) => P.mutate((db) => { db.settings.autoRoster = e.target.checked; });
-    $('#t-rot').onchange = (e) => P.mutate((db) => { db.settings.rotate = e.target.checked; });
+    $('#t-rhythm').onclick = () => $('#tb-gear').click();
     $$('[data-pedit]', main).forEach((b) => (b.onclick = () => editPerson(P.person(b.dataset.pedit))));
     $$('[data-pdel]', main).forEach((b) => (b.onclick = () => {
       const p = P.person(b.dataset.pdel);
-      P.mutate((db) => { db.staff = db.staff.filter((x) => x.id !== p.id); }, `${p.name} gelöscht.`, true);
+      P.mutate((db) => {
+        db.staff = db.staff.filter((x) => x.id !== p.id);
+        db.staff.forEach((x) => { if (x.partner === p.id) x.partner = ''; });
+      }, `${p.name} gelöscht.`, true);
     }));
   };
 
   function editPerson(p) {
     const used = P.db.staff.map((x) => x.color);
     const color = p ? p.color : P.COLORS.find((c) => !used.includes(c)) || P.COLORS[0];
+    const others = P.db.staff.filter((x) => !p || x.id !== p.id);
     P.modal({
       title: p ? 'Person bearbeiten' : 'Person erfassen',
       body: `<label class="fld"><span>Name</span><input name="name" required value="${esc(p?.name || '')}" placeholder="Vorname Nachname"></label>
         <div class="fld-row"><label class="fld"><span>Kürzel</span><input name="short" maxlength="3" value="${esc(p?.short || '')}" placeholder="z. B. MS"></label>
         <label class="fld"><span>Farbe</span><input type="color" name="color" value="${esc(color)}"></label></div>
-        <label class="fld"><span>Schichtgruppe</span><select name="group"><option value="">keine (nur manuell einteilen)</option>${P.SHIFTS.map((s) => `<option value="${s.k}"${p?.group === s.k ? ' selected' : ''}>${s.label} (${s.k})</option>`).join('')}</select></label>`,
+        <label class="fld"><span>Schichtgruppe</span><select name="group"><option value="">keine (nur von Hand einteilen)</option>${P.db.settings.groups.map((g) => `<option value="${g.id}"${p?.group === g.id ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>
+        <label class="fld"><span>Arbeitet meist zusammen mit (Paar)</span><select name="partner"><option value="">niemand</option>${others.map((x) => { const xp = P.partnerOf(x.id); return `<option value="${x.id}"${p?.partner === x.id ? ' selected' : ''}>${esc(x.name)}${x.group ? ' · ' + esc(P.group(x.group)?.name || '') : ''}${xp && (!p || xp.id !== p.id) ? ' (bisher mit ' + esc(xp.name) + ')' : ''}</option>`; }).join('')}</select>
+          <small class="muted">Die Partnerin / der Partner wird automatisch in dieselbe Gruppe übernommen.</small></label>`,
       onOk: (f) => {
         const d = P.formData(f);
         if (!d.name) { f.name.focus(); f.name.classList.add('bad'); return false; }
         d.short = (d.short || d.name.split(/\s+/).map((x) => x[0]).join('').slice(0, 2)).toUpperCase();
-        P.mutate((db) => { if (p) Object.assign(p, d); else db.staff.push(Object.assign({ id: P.newId('p') }, d)); }, p ? 'Gespeichert.' : `${d.name} erfasst.`);
+        P.mutate((db) => {
+          let me = p;
+          if (me) Object.assign(me, { name: d.name, short: d.short, color: d.color, group: d.group });
+          else { me = { id: P.newId('p'), name: d.name, short: d.short, color: d.color, group: d.group, partner: '' }; db.staff.push(me); }
+          // pair links are symmetric
+          if (me.partner && me.partner !== d.partner) { const old = db.staff.find((x) => x.id === me.partner); if (old && old.partner === me.id) old.partner = ''; }
+          me.partner = d.partner || '';
+          if (me.partner) {
+            const pt = db.staff.find((x) => x.id === me.partner);
+            if (pt.partner && pt.partner !== me.id) { const ex = db.staff.find((x) => x.id === pt.partner); if (ex) ex.partner = ''; }
+            pt.partner = me.id;
+            pt.group = me.group;
+          }
+        }, p ? 'Gespeichert.' : `${d.name} erfasst.`);
       },
     });
   }
@@ -389,7 +509,7 @@
     if (tab === 'daily') tbl = `<table class="tbl"><thead><tr><th>Tägliche Arbeit</th><th>Intervall</th><th class="num">Std.</th><th class="num">MA</th><th>S/B</th><th></th></tr></thead><tbody>
       ${P.db.daily.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.note ? `<small class="block muted">${esc(t.note)}</small>` : ''}</td><td>${esc(P.INTERVAL[t.interval])}</td><td class="num">${t.std ? P.hrs(t.std) : '–'}</td><td class="num">${t.ma || 1}</td><td><span class="sb sb-${t.sb}">${t.sb}</span></td>${acts(t.id)}</tr>`).join('') || '<tr><td colspan="6" class="empty">Keine Einträge.</td></tr>'}</tbody></table>`;
     if (tab === 'maint') tbl = `<table class="tbl"><thead><tr><th>Komponente</th><th>Beschreibung</th><th>Hilfsmittel</th><th>Zyklus</th><th class="num">KW Start</th><th>Nächste</th><th class="num">Std.</th><th class="num">MA</th><th>S/B</th><th></th></tr></thead><tbody>
-      ${P.db.maint.map((t) => { const n = P.nextDue(t, P.today()); return `<tr><td>${esc(t.comp)}</td><td><b>${esc(t.desc)}</b></td><td class="muted">${esc(t.aid || '')}</td><td class="nowrap">${P.cycleLabel(t)}</td><td class="num">${t.kw} / ${t.year}</td><td class="nowrap">${n ? 'KW ' + P.isoWeek(n).w : '–'}</td><td class="num">${t.std ? P.hrs(t.std) : '–'}</td><td class="num">${t.ma || 1}</td><td><span class="sb sb-${t.sb}">${t.sb}</span></td>${acts(t.id)}</tr>`; }).join('') || '<tr><td colspan="10" class="empty">Keine Einträge.</td></tr>'}</tbody></table>`;
+      ${P.db.maint.map((t) => { const n = P.nextDue(t); return `<tr><td>${esc(t.comp)}</td><td><b>${esc(t.desc)}</b></td><td class="muted">${esc(t.aid || '')}</td><td class="nowrap">${P.cycleLabel(t)}</td><td class="num">${t.kw} / ${t.year}</td><td class="nowrap">${n ? 'KW ' + P.isoWeek(n).w : '–'}</td><td class="num">${t.std ? P.hrs(t.std) : '–'}</td><td class="num">${t.ma || 1}</td><td><span class="sb sb-${t.sb}">${t.sb}</span></td>${acts(t.id)}</tr>`; }).join('') || '<tr><td colspan="10" class="empty">Keine Einträge.</td></tr>'}</tbody></table>`;
     if (tab === 'rev') tbl = `<table class="tbl"><thead><tr><th>Komponente</th><th class="num">Punkte</th><th>Unterlagen</th><th></th></tr></thead><tbody>
       ${P.db.rev.map((r) => `<tr><td><b>${esc(r.comp)}</b></td><td class="num">${r.steps.filter((s) => !/^[#!]/.test(s)).length}</td><td class="muted small">${esc(r.docs || '')}</td>${acts(r.id)}</tr>`).join('') || '<tr><td colspan="4" class="empty">Keine Einträge.</td></tr>'}</tbody></table>`;
 

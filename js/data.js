@@ -5,11 +5,23 @@
   const P = window.P;
 
   P.SHIFTS = [
-    { k: 'F', label: 'Frühschicht', time: '06–14', icon: 'sun' },
-    { k: 'S', label: 'Spätschicht', time: '14–22', icon: 'sunset' },
-    { k: 'N', label: 'Nachtschicht', time: '22–06', icon: 'moon' },
+    { k: 'F', label: 'Frühschicht', icon: 'sun' },
+    { k: 'S', label: 'Spätschicht', icon: 'sunset' },
+    { k: 'N', label: 'Nachtschicht', icon: 'moon' },
   ];
   P.SHIFT = Object.fromEntries(P.SHIFTS.map((s) => [s.k, s]));
+  P.DEFAULT_TIMES = { F: { from: '06:00', to: '14:00' }, S: { from: '14:00', to: '22:00' }, N: { from: '22:00', to: '06:00' } };
+
+  /* Schichtgruppen und Rhythmus. Das Muster gilt für Gruppe A ab dem Startdatum (ein Zeichen pro Tag:
+     F/S/N = Schicht, - = frei); die übrigen Gruppen laufen um je ein Viertel der Musterlänge versetzt. */
+  P.GROUP_IDS = ['A', 'B', 'C', 'D'];
+  P.GROUP_COLORS = { A: '#1971C2', B: '#2B8A3E', C: '#C2255C', D: '#E67700' };
+  P.PATTERNS = [
+    { k: 'w7', label: 'Wöchentlich: 7 Früh · 7 Spät · 7 Nacht · 7 frei', pattern: 'FFFFFFFSSSSSSSNNNNNNN-------' },
+    { k: 'w5', label: 'Wöchentlich Mo–Fr: 5 Früh · 5 Spät · 5 Nacht, Wochenende + 1 Woche frei', pattern: 'FFFFF--SSSSS--NNNNN---------' },
+    { k: 'd2', label: 'Kurzwechsel 2-2-2-2: 2 Früh · 2 Spät · 2 Nacht · 2 frei', pattern: 'FFSSNN--' },
+    { k: 'd3', label: 'Kurzwechsel 3-3-3-3: 3 Früh · 3 Spät · 3 Nacht · 3 frei', pattern: 'FFFSSSNNN---' },
+  ];
 
   P.INTERVALS = [
     ['jede', 'Jede Schicht'],
@@ -24,6 +36,17 @@
 
   P.STATES = { B: 'Betrieb', S: 'Stillstand', X: 'Frei' };
   P.COLORS = ['#D9480F', '#1971C2', '#2B8A3E', '#9C36B5', '#C2255C', '#0B7285', '#E67700', '#5C7CFA', '#495057', '#A61E4D'];
+
+  P.defaultSettings = () => ({
+    // Standard-Schichten je Wochentag, an denen die Anlage läuft (0 = So)
+    workdays: { 0: [], 1: ['F', 'S', 'N'], 2: ['F', 'S', 'N'], 3: ['F', 'S', 'N'], 4: ['F', 'S', 'N'], 5: ['F', 'S', 'N'], 6: [] },
+    times: JSON.parse(JSON.stringify(P.DEFAULT_TIMES)),
+    groups: P.GROUP_IDS.map((g) => ({ id: g, name: 'Gruppe ' + g, color: P.GROUP_COLORS[g] })),
+    pattern: P.PATTERNS[0].pattern,
+    patternStart: P.monday(P.today()), // an diesem Tag beginnt Gruppe A mit dem 1. Zeichen des Musters
+    line: 'M31',
+    since: P.today(), // ab hier gelten offene Vorkommen als überfällig
+  });
 
   P.seed = function () {
     const year = new Date().getFullYear();
@@ -49,7 +72,7 @@
       ['Extruder', 'Düse reinigen', 'Unterseite beachten!', 2, 'M', 27],
       ['Wasserpumpe', 'Rückschlag Wasserpumpe reinigen', 'Compo-Produktion ohne Vakuum', 1, 'M', 29],
       ['Wasserpumpe', 'Wasserreservoir entleeren', 'Staubsauger mit Pumpe', 2, 'M', 25],
-    ].map(([comp, desc, aid, cycle, unit, kw]) => ({ id: id('m'), comp, desc, aid, cycle, unit, kw, year, weekday: '', shift: '', std: null, ma: 1, sb: 'B', needWeight: /Gewicht/.test(aid) }));
+    ].map(([comp, desc, aid, cycle, unit, kw]) => ({ id: id('m'), comp, desc, aid, cycle, unit, kw, year, weekday: '', shift: '', std: null, ma: 1, sb: 'B', needWeight: /Gewicht/.test(aid), done: [] }));
 
     const walze = {
       steps: [
@@ -147,23 +170,19 @@
       },
     ].map((r) => ({ id: id('r'), comp: r.comp, steps: r.steps, docs: r.docs, date: '', shift: '', who: [], checked: {}, doneAt: '' }));
 
+    /* 8 Beispielpersonen: je Gruppe ein Paar */
     const staff = [
-      ['Beispiel Anna', 'AB'], ['Beispiel Ben', 'BB'], ['Beispiel Carla', 'CB'],
-      ['Beispiel David', 'DB'], ['Beispiel Elif', 'EB'], ['Beispiel Fabio', 'FB'],
-    ].map(([name, short], i) => ({ id: id('p'), name, short, color: P.COLORS[i], group: ['F', 'S', 'N'][i % 3] }));
+      ['Beispiel Anna', 'AN'], ['Beispiel Ben', 'BE'], ['Beispiel Carla', 'CA'], ['Beispiel David', 'DA'],
+      ['Beispiel Elif', 'EL'], ['Beispiel Fabio', 'FA'], ['Beispiel Gina', 'GI'], ['Beispiel Hugo', 'HU'],
+    ].map(([name, short], i) => ({ id: id('p'), name, short, color: P.COLORS[i], group: P.GROUP_IDS[i >> 1], partner: '' }));
+    for (let i = 0; i < staff.length; i += 2) { staff[i].partner = staff[i + 1].id; staff[i + 1].partner = staff[i].id; }
 
     return {
-      v: 1, seq: n, daily, maint, rev, staff,
-      roster: {}, // 'YYYY-MM-DD|F' -> [staffId]
+      v: 2, seq: n, daily, maint, rev, staff,
+      roster: {}, // 'YYYY-MM-DD|F' -> [staffId] (Abweichung von der Schichtgruppe)
       plant: {}, // 'YYYY-MM-DD|F' -> 'B' | 'S' | 'X' (Abweichung vom Standard)
       occ: {}, // Vorkommen-Schlüssel -> { who: [], done: bool, at, weight }
-      settings: {
-        // Standard-Schichten je Wochentag (0 = So)
-        workdays: { 0: [], 1: ['F', 'S', 'N'], 2: ['F', 'S', 'N'], 3: ['F', 'S', 'N'], 4: ['F', 'S', 'N'], 5: ['F', 'S', 'N'], 6: [] },
-        autoRoster: true, // Team nach Schichtgruppe automatisch einteilen
-        line: 'M31',
-        since: P.today(), // ab hier gelten offene Vorkommen als überfällig
-      },
+      settings: P.defaultSettings(),
     };
   };
 })();

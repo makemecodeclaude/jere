@@ -1,7 +1,7 @@
 {
   "name": "m31-planung",
   "productName": "M31 Planung",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Schicht- und Arbeitsplanung: tägliche Arbeiten, Wartungsplan und Revision mit Personaleinteilung.",
   "main": "electron/main.js",
   "author": "M31",
