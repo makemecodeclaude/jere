@@ -37,6 +37,9 @@
     }));
   }
 
+  /* undo for the action just done: P.mutate keeps the previous state in P.lastBefore */
+  const undoLast = () => { const before = P.lastBefore; return before ? () => { P.db = JSON.parse(before); P.save(); P.render(); } : null; };
+
   /* avatars of a crew, pairs drawn together */
   const crewHtml = (ids) => P.units(ids).map((u) => u.length > 1 ? `<span class="pair" title="Paar">${u.map((id) => P.avatar(P.person(id))).join('')}</span>` : P.avatar(P.person(u[0]))).join('');
   P.crewHtml = crewHtml;
@@ -76,7 +79,7 @@
         </section>
         <section class="card">
           <div class="card-h"><h2>${icon('revision')}Revision diese Woche</h2><button class="link" data-go="revision">Revision →</button></div>
-          ${revs.length ? `<ul class="mlist">${revs.map((r) => { const tot = r.steps.filter((x) => !/^[#!]/.test(x)).length, dn = Object.values(r.checked).filter(Boolean).length; return `<li class="st-${r.doneAt ? 'done' : P.state(r.date, r.shift || 'F') === 'S' ? 'due' : 'wait'}"><span><b>${esc(r.comp)}</b><small>${P.fmtDate(r.date)}${r.shift ? ' · ' + P.SHIFT[r.shift].label : ''} · ${dn}/${tot} Punkte</small></span><span class="who-s">${r.who.map((id) => P.avatar(P.person(id))).join('')}</span></li>`; }).join('')}</ul>` : '<p class="empty">Keine Revision eingeplant. Unter «Revision» ein Datum setzen.</p>'}
+          ${revs.length ? `<ul class="mlist">${revs.map((r) => { const [dn, tot] = P.revProgress(r); return `<li class="st-${r.doneAt ? 'done' : P.state(r.date, r.shift || 'F') === 'S' ? 'due' : 'wait'}"><span><b>${esc(r.comp)}</b><small>${P.fmtDate(r.date)}${r.shift ? ' · ' + P.SHIFT[r.shift].label : ''} · ${dn}/${tot} Punkte</small></span><span class="who-s">${r.who.map((id) => P.avatar(P.person(id))).join('')}</span></li>`; }).join('')}</ul>` : '<p class="empty">Keine Revision eingeplant. Unter «Revision» ein Datum setzen.</p>'}
         </section>
       </div>
     </div>`;
@@ -94,6 +97,7 @@
           <span class="bar"><i style="width:${pct}%"></i></span>
           <span>${c.done}/${c.total} erledigt${c.missed ? ` · <b>${c.missed} offen</b>` : ''}${c.wait ? ` · ${c.wait} Stillst.` : ''}</span>
         </button>
+        ${c.total && c.done < c.total ? `<button class="all-done" data-alldone="${dk}|${sh}" title="Alle Aufgaben dieser Schicht als erledigt markieren">${icon('check')}Alle erledigt</button>` : ''}
       </div>`;
     }
 
@@ -103,6 +107,7 @@
     $$('[data-go]', main).forEach((b) => (b.onclick = () => P.go(b.dataset.go)));
     $$('[data-st]', main).forEach((b) => (b.onclick = (e) => { e.stopPropagation(); const [dk, sh] = b.dataset.st.split('|'); setState(dk, sh, nextState(P.state(dk, sh))); }));
     $$('[data-open]', main).forEach((b) => (b.onclick = () => { const [dk, sh] = b.dataset.open.split('|'); P.go('schicht', { date: dk, shift: sh }); }));
+    $$('[data-alldone]', main).forEach((b) => (b.onclick = () => { const [dk, sh] = b.dataset.alldone.split('|'); let n = 0; P.mutate(() => { n = P.completeShift(dk, sh); }, null); P.toast(`${n} Aufgaben als erledigt markiert.`, undoLast()); }));
     $$('[data-crew]', main).forEach((b) => (b.onclick = () => crewPicker(b, ...b.dataset.crew.split('|'))));
     $$('[data-mdone]', main).forEach((i) => (i.onchange = () => {
       const m = maint[i.dataset.mdone];
@@ -187,7 +192,7 @@
         <div class="sb-i"><small>Anlage</small>${stateChip(st, 'id="s-state"')}</div>
         <div class="sb-i grow"><small>Personal</small><div class="crew big">${P.units(crew).map((u) => `<span class="crew-u${u.length > 1 ? ' is-pair' : ''}">${u.map((id) => { const p = P.person(id); return p ? `<span class="crew-p">${P.avatar(p)}<span>${esc(p.name)}<em>${P.hrs(P.personHours(id, items))}</em></span></span>` : ''; }).join(u.length > 1 ? `<span class="pair-link" title="Paar">${icon('link')}</span>` : '')}</span>`).join('') || '<span class="txt-bad">Niemand eingeteilt</span>'}
           <button class="btn btn-ghost sm" id="s-crew">${icon('users')}Einteilen</button></div></div>
-        <div class="sb-i"><small>&nbsp;</small><button class="btn btn-primary" id="s-auto"${!crew.length || st === 'X' ? ' disabled' : ''}>${icon('wand')}Automatisch verteilen</button></div>
+        <div class="sb-i"><small>&nbsp;</small><div class="btn-row nowrap"><button class="btn btn-ghost" id="s-all"${st === 'X' || !P.cellItems(dk, sh).some((i) => i.status !== 'done') ? ' disabled' : ''} title="Alle Aufgaben dieser Schicht (tägliche Arbeiten, hier geplante Wartung und Revision) als erledigt markieren">${icon('check')}Alle erledigt</button><button class="btn btn-primary" id="s-auto"${!crew.length || st === 'X' ? ' disabled' : ''}>${icon('wand')}Automatisch verteilen</button></div></div>
       </div>
       ${legend()}
 
@@ -228,6 +233,7 @@
     $$('[name=sh]', main).forEach((r) => (r.onchange = () => { P.ui.shift = r.value; P.render(); }));
     $('#s-state').onclick = () => setState(dk, sh, nextState(st));
     $('#s-crew').onclick = (e) => crewPicker(e.currentTarget, dk, sh);
+    $('#s-all').onclick = () => { let n = 0; P.mutate(() => { n = P.completeShift(dk, sh); }); P.toast(`${n} Aufgaben als erledigt markiert.`, undoLast()); };
     $('#s-auto').onclick = () => { let n = 0; P.mutate(() => { n = P.autoAssign(dk, sh); }); P.toast(n ? `${n} Aufgaben verteilt.` : 'Alle offenen Aufgaben sind bereits zugeteilt.'); };
     $$('[data-done]', main).forEach((c) => (c.onchange = () => {
       const it = all[c.dataset.done];
@@ -318,7 +324,7 @@
     </div>`;
 
     function card(r) {
-      const tot = r.steps.filter((s) => !/^[#!]/.test(s)).length, dn = r.steps.filter((s, i) => !/^[#!]/.test(s) && r.checked[i]).length;
+      const [dn, tot] = P.revProgress(r);
       const st = r.doneAt ? 'done' : r.date ? 'due' : 'none';
       const notS = r.date && !r.doneAt && P.state(r.date, r.shift || 'F') !== 'S';
       return `<article class="rcard st-${st}" id="rev-${r.id}">
@@ -334,7 +340,7 @@
         ${notS ? `<div class="banner tone-warn small">${icon('alert')}<span>Anlage ist an diesem Datum nicht im Stillstand.</span><button class="btn btn-ghost sm" data-rstill="${r.id}">Stillstand setzen</button></div>` : ''}
         <ul class="steps">${r.steps.map((s, i) => s.startsWith('#') ? `<li class="st-h">${esc(s.slice(1).trim())}</li>` : s.startsWith('!') ? `<li class="st-w">${icon('alert')}${esc(s.slice(1).trim())}</li>` : `<li><label class="chk"><input type="checkbox" data-step="${r.id}|${i}"${r.checked[i] ? ' checked' : ''}><span>${esc(s)}</span></label></li>`).join('')}</ul>
         ${r.docs ? `<p class="docs">${icon('doc')}<span>${esc(r.docs)}</span></p>` : ''}
-        <footer>${r.doneAt || dn ? `<button class="btn btn-ghost sm" data-rreset="${r.id}">Zurücksetzen</button>` : ''}${!r.doneAt ? `<button class="btn btn-primary sm" data-rdone="${r.id}"${dn < tot ? ' title="Noch nicht alle Punkte abgehakt"' : ''}>${icon('check')}Als erledigt markieren</button>` : ''}</footer>
+        <footer>${r.doneAt || dn ? `<button class="btn btn-ghost sm" data-rreset="${r.id}">Zurücksetzen</button>` : ''}${!r.doneAt ? `<button class="btn btn-primary sm" data-rdone="${r.id}"${dn < tot ? ' title="Hakt alle Punkte ab"' : ''}>${icon('check')}Alles erledigt</button>` : ''}</footer>
       </article>`;
     }
     const R = (id) => P.db.rev.find((r) => r.id === id);
@@ -345,9 +351,9 @@
     $$('[data-rstill]', main).forEach((b) => (b.onclick = () => { const r = R(b.dataset.rstill); P.mutate((db) => { (r.shift ? [r.shift] : ['F', 'S', 'N']).forEach((s) => (db.plant[P.slot(r.date, s)] = 'S')); }, 'Stillstand im Wochenplan gesetzt.', true); }));
     $$('[data-step]', main).forEach((c) => (c.onchange = () => P.mutate(() => {
       const [id, i] = c.dataset.step.split('|'), r = R(id);
-      if (c.checked) r.checked[i] = true; else delete r.checked[i];
+      P.revSetStep(r, i, c.checked);
     })));
-    $$('[data-rdone]', main).forEach((b) => (b.onclick = () => P.mutate(() => { R(b.dataset.rdone).doneAt = P.stamp(); }, 'Revision als erledigt markiert.', true)));
+    $$('[data-rdone]', main).forEach((b) => (b.onclick = () => P.mutate(() => P.revDoneAll(R(b.dataset.rdone)), 'Alle Punkte abgehakt – Revision erledigt.', true)));
     $$('[data-rreset]', main).forEach((b) => (b.onclick = () => P.mutate(() => { const r = R(b.dataset.rreset); r.checked = {}; r.doneAt = ''; }, 'Checkliste zurückgesetzt.', true)));
     bindWho(main);
     if (P.ui.revFocus) { const el = $('#rev-' + P.ui.revFocus); P.ui.revFocus = null; if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('flash'); } }
@@ -365,6 +371,22 @@
     const toggle = (k, label, extra = '') => `<label class="tg${L[k] ? ' on' : ''}"${extra}><input type="checkbox" data-layer="${k}"${L[k] ? ' checked' : ''}><span>${label}</span></label>`;
     const maintCells = [];
 
+    /* maintenance sits on a day: done → completion day, fixed weekday → that day, otherwise first operating day of the week */
+    const maintByDay = {};
+    if (L.maint) for (const mon of weeks) {
+      const days = [...Array(7)].map((_, i) => P.addDays(mon, i));
+      const firstOp = days.find((d) => P.SHIFTS.some((x) => P.state(d, x.k) !== 'X')) || mon;
+      for (const it of P.weekMaint(mon)) {
+        const d = it.comp ? it.comp.date : it.t.weekday !== '' && it.t.weekday != null ? days[(Number(it.t.weekday) + 6) % 7] : (it.status === 'late' && P.monday(today) === mon ? (days.includes(today) ? today : firstOp) : firstOp);
+        (maintByDay[d] = maintByDay[d] || []).push([it, mon]);
+      }
+    }
+    const maintChips = (d) => (maintByDay[d] || []).map(([it, mon]) => {
+      maintCells.push([it, mon]);
+      const tip = `${it.t.comp}: ${it.t.desc} · ${it.status === 'done' ? 'erledigt ' + P.fmtShort(it.comp.date) : it.status === 'late' ? 'überfällig' : it.proj ? 'voraussichtlich fällig' : 'fällig'}${it.t.weekday ? '' : it.comp ? '' : ' (diese Woche, Tag frei wählbar)'}`;
+      return `<button class="mchip st-${it.status}${it.proj ? ' proj' : ''}" data-mc="${maintCells.length - 1}" title="${esc(tip)}">${it.status === 'done' ? icon('check') : icon('wrench')}<span>${esc(it.t.desc)}</span></button>`;
+    }).join('');
+
     const dayCell = (d) => {
       const out = P.parse(d).getMonth() !== month;
       const rows = !out ? P.SHIFTS.filter((x) => L[x.k]).map((x) => {
@@ -372,13 +394,9 @@
         return `<div class="mrow st-${st}" title="${x.label} ${esc(P.shiftTime(x.k))} · ${P.STATES[st]}"><i>${x.k}</i>${st === 'X' ? '<span class="muted">–</span>' : gs.map((g) => P.groupChip(g, true)).join('')}${st === 'S' ? '<em>Stillstand</em>' : ''}</div>`;
       }).join('') : '';
       const revs = !out && L.rev ? P.db.rev.filter((r) => r.date === d).map((r) => `<button class="mchip rev st-${r.doneAt ? 'done' : 'due'}" data-rev="${r.id}" title="Revision${r.shift ? ' · ' + P.SHIFT[r.shift].label : ''}">${icon('revision')}${esc(r.comp)}</button>`).join('') : '';
+      const mc = maintChips(d);
       return `<div class="mday${out ? ' out' : ''}${d === today ? ' today' : ''}${P.wd(d) % 6 === 0 ? ' we' : ''}">
-        <button class="mnum" data-day="${d}" title="Woche öffnen">${P.parse(d).getDate()}</button>${rows}${revs}</div>`;
-    };
-    const maintStrip = (mon) => {
-      if (!L.maint) return '';
-      const its = P.weekMaint(mon);
-      return `<div class="mstrip">${its.length ? its.map((it) => { maintCells.push([it, mon]); return `<button class="mchip st-${it.status}${it.proj ? ' proj' : ''}" data-mc="${maintCells.length - 1}" title="${esc(it.t.comp)} · ${it.status === 'done' ? 'erledigt ' + P.fmtShort(it.comp.date) : it.status === 'late' ? 'überfällig' : it.proj ? 'voraussichtlich' : 'fällig'}">${it.status === 'done' ? icon('check') : icon('wrench')}${esc(it.t.desc)}${it.t.weekday ? ` <small>${P.WD[it.t.weekday]}</small>` : ''}</button>`; }).join('') : '<span class="muted small">keine Wartung</span>'}</div>`;
+        <button class="mnum" data-day="${d}" title="Woche öffnen">${P.parse(d).getDate()}</button>${rows}${revs}${mc ? `<div class="mtasks">${mc}</div>` : ''}</div>`;
     };
 
     main.innerHTML = `<div class="page">
@@ -396,7 +414,7 @@
       </div>
       <div class="mon">
         <div class="mh">KW</div>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<div class="mh">${P.WDL[d]}</div>`).join('')}
-        ${weeks.map((mon) => `<button class="mkw${mon === P.monday(today) ? ' now' : ''}${L.maint ? '' : ' one'}" data-week="${mon}" title="Wochenplan öffnen">KW<b>${P.isoWeek(mon).w}</b></button>${[...Array(7)].map((_, i) => dayCell(P.addDays(mon, i))).join('')}${maintStrip(mon)}`).join('')}
+        ${weeks.map((mon) => `<button class="mkw${mon === P.monday(today) ? ' now' : ''}" data-week="${mon}" title="Wochenplan öffnen">KW<b>${P.isoWeek(mon).w}</b></button>${[...Array(7)].map((_, i) => dayCell(P.addDays(mon, i))).join('')}`).join('')}
       </div>
     </div>`;
 

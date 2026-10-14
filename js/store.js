@@ -36,6 +36,8 @@
       db.v = 2;
     }
     for (const t of db.maint) t.done = t.done || [];
+    // revisions marked done before 1.2 kept their boxes empty: tick them now
+    for (const r of db.rev) if (r.doneAt) r.steps.forEach((x, i) => { if (!/^[#!]/.test(x)) r.checked[i] = true; });
     for (const p of db.staff) if (p.partner && !db.staff.some((x) => x.id === p.partner)) p.partner = '';
     return db;
   };
@@ -59,11 +61,12 @@
 
   /* every write goes through here */
   P.mutate = function (fn, msg, undoable) {
-    const before = undoable ? JSON.stringify(P.db) : null;
+    const before = JSON.stringify(P.db);
+    P.lastBefore = before;
     fn(P.db);
     P.save();
     P.render();
-    if (msg) P.toast(msg, before ? () => { P.db = JSON.parse(before); P.save(); P.render(); } : null);
+    if (msg) P.toast(msg, undoable ? () => { P.db = JSON.parse(before); P.save(); P.render(); } : null);
   };
   P.newId = (p) => p + P.db.seq++;
 
@@ -275,22 +278,24 @@
     }));
     for (const r of P.db.rev) {
       if (r.date !== dk || (r.shift && r.shift !== sh)) continue;
-      const total = r.steps.filter((s) => !/^[#!]/.test(s)).length;
-      const done = Object.values(r.checked).filter(Boolean).length;
-      items.push({ kind: 'rev', t: r, key: 'r|' + r.id, o: { who: r.who, done: !!r.doneAt }, status: r.doneAt ? 'done' : (st === 'S' ? 'due' : 'wait'), progress: [done, total] });
+      items.push({ kind: 'rev', t: r, key: 'r|' + r.id, o: { who: r.who, done: !!r.doneAt }, status: r.doneAt ? 'done' : (st === 'S' ? 'due' : 'wait'), progress: P.revProgress(r) });
     }
     return items;
   };
 
-  /* summary of a shift for the week grid: daily + revision items, maintenance only if planned or done here */
+  /* items that belong to a single shift (week grid + "alle erledigt"): daily, revision, and maintenance planned or done there */
+  P.cellItems = function (dk, sh) {
+    const slot = P.slot(dk, sh);
+    return P.shiftItems(dk, sh).filter((i) => {
+      if (i.kind !== 'maint') return true;
+      return (i.status === 'due' && (i.t.weekday || i.t.shift)) || (i.status === 'done' && i.o.slot === slot);
+    });
+  };
+
+  /* summary of a shift for the week grid */
   P.summary = function (dk, sh) {
-    const slot = P.slot(dk, sh), cnt = { total: 0, done: 0, open: 0, wait: 0 };
-    for (const i of P.shiftItems(dk, sh)) {
-      if (i.kind === 'maint') {
-        const planned = i.status === 'due' && (i.t.weekday || i.t.shift);
-        const doneHere = i.status === 'done' && i.o.slot === slot;
-        if (!planned && !doneHere) continue;
-      }
+    const cnt = { total: 0, done: 0, open: 0, wait: 0 };
+    for (const i of P.cellItems(dk, sh)) {
       cnt.total++;
       if (i.status === 'done') cnt.done++;
       else if (i.status === 'wait') cnt.wait++;
@@ -298,6 +303,28 @@
     }
     cnt.missed = P.dayNum(dk) < P.dayNum(P.today()) && P.dayNum(dk) >= P.dayNum(P.db.settings.since || dk) ? cnt.open : 0;
     return cnt;
+  };
+
+  /* revision checklist: steps that can be ticked (no headings / warnings) */
+  P.revSteps = (r) => r.steps.map((s, i) => [s, i]).filter(([s]) => !/^[#!]/.test(s)).map(([, i]) => i);
+  P.revProgress = (r) => { const idx = P.revSteps(r); return [idx.filter((i) => r.checked[i]).length, idx.length]; };
+  P.revDoneAll = (r) => { r.checked = {}; for (const i of P.revSteps(r)) r.checked[i] = true; r.doneAt = r.doneAt || P.stamp(); };
+  P.revSetStep = (r, i, on) => {
+    if (on) r.checked[i] = true; else delete r.checked[i];
+    const [d, t] = P.revProgress(r);
+    if (t && d === t) r.doneAt = r.doneAt || P.stamp(); else r.doneAt = '';
+  };
+
+  /* mark every open item of a shift as done; returns how many */
+  P.completeShift = function (dk, sh) {
+    let n = 0;
+    for (const i of P.cellItems(dk, sh)) {
+      if (i.status === 'done') continue;
+      if (i.kind === 'rev') P.revDoneAll(i.t);
+      else P.toggleItem(i, true, dk, sh);
+      n++;
+    }
+    return n;
   };
 
   /* hours per person in a shift (fallback 0.25 h per task without Std.) */
