@@ -218,10 +218,10 @@
   };
 
   /* mark maintenance done on a date (completes the open occurrence and restarts the cycle) */
-  P.completeMaint = (t, date, slot, srcKey) => {
+  P.completeMaint = (t, date, slot, srcKey, extra = {}) => {
     const openKey = P.kMaint(t, P.chain(t).next);
     const src = P.db.occ[srcKey] || P.db.occ[openKey] || {};
-    t.done.push({ date, slot: slot || '', who: (src.who || []).slice(), weight: src.weight ?? null, at: P.stamp() });
+    t.done.push({ date, slot: slot || '', who: (extra.who || src.who || []).slice(), weight: src.weight ?? null, note: extra.note || '', at: P.stamp() });
     if (srcKey) delete P.db.occ[srcKey];
     delete P.db.occ[openKey];
   };

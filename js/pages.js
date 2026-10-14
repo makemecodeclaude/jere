@@ -40,6 +40,52 @@
   /* undo for the action just done: P.mutate keeps the previous state in P.lastBefore */
   const undoLast = () => { const before = P.lastBefore; return before ? () => { P.db = JSON.parse(before); P.save(); P.render(); } : null; };
 
+  /* small window to confirm (or undo) a maintenance job – used in the month view and the maintenance plan */
+  P.maintConfirm = function (anchor, it, opt = {}) {
+    const t = it.t, today = P.today();
+    const head = `<div class="pop-h cf-h"><small>${esc(t.comp)}</small><b>${esc(t.desc)}</b></div>`;
+    const meta = `<div class="cf-meta">${t.aid ? `<span>${icon('info')}${esc(t.aid)}</span>` : ''}<span>${icon('clock')}${P.cycleLabel(t)}</span></div>`;
+    if (it.comp) {
+      const c = it.comp;
+      P.pop(anchor, `${head}<div class="pop-b">${meta}
+          <p class="cf-done">${icon('check')}Erledigt am <b>${P.fmtDate(c.date)}</b>${(c.who || []).length ? ' von ' + c.who.map((id) => esc(P.person(id)?.name || '')).join(', ') : ''}</p>
+          ${c.weight != null ? `<p class="muted small">Gewicht: ${c.weight} kg</p>` : ''}${c.note ? `<p class="muted small">«${esc(c.note)}»</p>` : ''}
+          <p class="muted small">Nächste Fälligkeit: KW ${P.isoWeek(P.nextDue(t)).w}</p></div>
+        <div class="pop-f"><button class="link" data-plan>Im Wartungsplan</button><button class="btn btn-ghost sm" data-undo>Rückgängig</button></div>`, (el) => {
+        el.querySelector('[data-undo]').onclick = () => P.mutate(() => P.uncompleteMaint(t, c), 'Bestätigung zurückgenommen.', true);
+        el.querySelector('[data-plan]').onclick = () => { P.ui.wDate = it.week; P.go('wartung'); };
+      });
+      return;
+    }
+    let date = opt.date && P.dayNum(opt.date) <= P.dayNum(today) ? opt.date : today;
+    // people on shift that day, plus whoever is already assigned
+    const pool = [...new Set([...P.SHIFTS.flatMap((x) => P.crew(date, x.k)), ...(it.o.who || [])])];
+    const sel = new Set(it.o.who || []);
+    const status = it.status === 'late' ? `<span class="txt-bad">überfällig seit KW ${P.isoWeek(it.week).w}</span>` : `${it.proj ? 'voraussichtlich ' : ''}fällig in KW ${P.isoWeek(it.week).w}`;
+    P.pop(anchor, `${head}<div class="pop-b">${meta}<p class="small">${status}</p>
+        <label class="fld"><span>Erledigt am</span><input type="date" data-cf-date value="${date}" max="${today}"></label>
+        <div class="fld"><span>Erledigt von</span><div class="who cf-who">${pool.map((id) => { const p = P.person(id); return p ? `<button type="button" class="av-t${sel.has(id) ? ' on' : ''}" data-cf-who="${id}" title="${esc(p.name)}">${P.avatar(p)}</button>` : ''; }).join('') || '<span class="muted small">Niemand eingeteilt</span>'}</div></div>
+        ${t.needWeight ? `<label class="fld"><span>Gewicht (kg)</span><input type="number" step="0.1" min="0" data-cf-weight value="${it.o.weight ?? ''}"></label>` : ''}
+        <label class="fld"><span>Bemerkung (optional)</span><input data-cf-note maxlength="140" placeholder="z. B. Filter ersetzt"></label>
+        <p class="muted small">${P.dayNum(date) < P.dayNum(it.week) ? 'Wird früher erledigt: ' : ''}Der Zyklus beginnt ab diesem Datum neu.</p></div>
+      <div class="pop-f"><button class="btn btn-ghost sm" data-cancel>Abbrechen</button><button class="btn btn-primary sm" data-ok>${icon('check')}Bestätigen</button></div>`, (el) => {
+      el.querySelectorAll('[data-cf-who]').forEach((b) => (b.onclick = () => {
+        const id = b.dataset.cfWho, on = !sel.has(id), pt = P.partnerOf(id);
+        [id].concat(pt && pool.includes(pt.id) ? [pt.id] : []).forEach((x) => { on ? sel.add(x) : sel.delete(x); const bb = el.querySelector(`[data-cf-who="${x}"]`); if (bb) bb.classList.toggle('on', on); });
+      }));
+      el.querySelector('[data-cancel]').onclick = () => P.closePop();
+      el.querySelector('[data-ok]').onclick = () => {
+        const d = el.querySelector('[data-cf-date]').value || today;
+        const wEl = el.querySelector('[data-cf-weight]');
+        const note = el.querySelector('[data-cf-note]').value.trim();
+        P.mutate(() => {
+          if (wEl && wEl.value !== '') P.setOcc(it.key, { weight: Number(wEl.value) });
+          P.completeMaint(t, d, '', it.key, { who: [...sel], note });
+        }, `Bestätigt – nächste Fälligkeit KW ${P.isoWeek(P.cycleAdd(t, d)).w}.`, true);
+      };
+    });
+  };
+
   /* avatars of a crew, pairs drawn together */
   const crewHtml = (ids) => P.units(ids).map((u) => u.length > 1 ? `<span class="pair" title="Paar">${u.map((id) => P.avatar(P.person(id))).join('')}</span>` : P.avatar(P.person(u[0]))).join('');
   P.crewHtml = crewHtml;
@@ -51,6 +97,8 @@
     const { w, y } = P.isoWeek(mon), today = P.today();
     const maint = P.weekMaint(mon);
     const revs = P.db.rev.filter((r) => r.date && r.date >= mon && r.date <= days[6]);
+    const sel = (P.ui.weekSel || []).filter((d) => days.includes(d)).sort();
+    const dpItems = [];
 
     main.innerHTML = `<div class="page">
       <div class="page-h">
@@ -66,9 +114,10 @@
       ${legend()}
       <div class="wk" role="grid" aria-label="Schichten KW ${w}">
         <div class="wk-c wk-corner">Schicht</div>
-        ${days.map((d) => `<div class="wk-c wk-day${d === today ? ' today' : ''}${P.wd(d) % 6 === 0 ? ' we' : ''}"><b>${P.WD[P.wd(d)]}</b><span>${P.fmtShort(d)}</span></div>`).join('')}
-        ${P.SHIFTS.map((s) => `${shiftHead(s)}${days.map((d) => cell(d, s.k)).join('')}`).join('')}
+        ${days.map((d) => `<div class="wk-c wk-day${d === today ? ' today' : ''}${P.wd(d) % 6 === 0 ? ' we' : ''}${sel.includes(d) ? ' sel sel-t' : ''}" data-selday="${d}" title="Tag auswählen (Strg/Shift + Klick: mehrere Tage)" role="button" tabindex="0" aria-pressed="${sel.includes(d)}"><b>${P.WD[P.wd(d)]}</b><span>${P.fmtShort(d)}</span></div>`).join('')}
+        ${P.SHIFTS.map((s, si) => `${shiftHead(s)}${days.map((d) => cell(d, s.k, sel.includes(d) ? ` sel${si === P.SHIFTS.length - 1 ? ' sel-b' : ''}` : '')).join('')}`).join('')}
       </div>
+      ${sel.length ? dayPanel() : `<p class="muted small sel-hint">${icon('info')}Tipp: Auf einen Tag klicken, um seine täglichen Aufgaben unten anzuzeigen. Mit Strg oder Shift lassen sich mehrere Tage wählen.</p>`}
 
       <div class="cols2">
         <section class="card">
@@ -84,13 +133,36 @@
       </div>
     </div>`;
 
-    function cell(dk, sh) {
+    function dayPanel() {
+      const card = (d, sh) => {
+        const st = P.state(d, sh), crew = P.crew(d, sh), x = P.SHIFT[sh];
+        const head = `<header>${icon(x.icon)}<b>${x.label}</b><small>${esc(P.shiftTime(sh))}</small><span class="grow"></span>${P.groupsOn(d, sh).map((g) => P.groupChip(g, true)).join('')}${crewHtml(crew)}</header>`;
+        if (st === 'X') return `<div class="dp-card off">${head}<p class="muted small">Anlage frei – keine Aufgaben.</p></div>`;
+        const items = P.cellItems(d, sh), open = items.filter((i) => i.status !== 'done').length;
+        return `<div class="dp-card st-${st}">${head}
+          <ul class="dp-list">${items.map((i) => {
+            dpItems.push({ i, d, sh });
+            const name = i.kind === 'daily' ? i.t.name : i.kind === 'maint' ? i.t.desc : `Revision ${i.t.comp}`;
+            const sub = i.kind === 'daily' ? P.INTERVAL_SHORT[i.t.interval] : i.kind === 'maint' ? `Wartung · ${i.t.comp}` : `${i.progress[0]}/${i.progress[1]} Punkte`;
+            const done = i.o.done ? `erledigt${i.o.at ? ' ' + esc(String(i.o.at).slice(11)) : ''}` : '';
+            return `<li class="st-${i.status}"><label class="chk"><input type="checkbox" data-dp="${dpItems.length - 1}"${i.o.done ? ' checked' : ''}><span><b>${esc(name)}</b><small>${esc(sub)}${done ? ' · ' + done : ''}${i.status === 'wait' ? ' · nur bei Stillstand' : ''}</small></span></label><span class="who-s">${crewHtml(P.getWho(i.key))}</span></li>`;
+          }).join('') || '<li class="muted small">Keine Aufgaben auf dieser Schicht.</li>'}</ul>
+          <footer><button class="link" data-open="${d}|${sh}">Schicht öffnen →</button>${open ? `<button class="all-done" data-alldone="${d}|${sh}">${icon('check')}Alle erledigt</button>` : `<span class="chip tone-ok">${icon('check')}Alles erledigt</span>`}</footer>
+        </div>`;
+      };
+      return `<section class="daypanel" id="daypanel">
+        <div class="card-h"><h2>${icon('list')}Tägliche Aufgaben <span class="count">${sel.length} ${sel.length > 1 ? 'Tage' : 'Tag'}</span></h2><button class="btn btn-ghost sm" id="w-selclear">${icon('x')}Auswahl aufheben</button></div>
+        ${sel.map((d) => `<div class="dp-day"><h3>${P.fmtLong(d)}${d === today ? ' <span class="chip tone-warn">Heute</span>' : ''}</h3><div class="dp-cols">${P.SHIFTS.map((x) => card(d, x.k)).join('')}</div></div>`).join('')}
+      </section>`;
+    }
+
+    function cell(dk, sh, selCls = '') {
       const st = P.state(dk, sh), crew = P.crew(dk, sh), grps = P.groupsOn(dk, sh).map((g) => P.groupChip(g)).join('');
-      if (st === 'X') return `<div class="wk-c wk-cell off">${stateChip(st, `data-st="${dk}|${sh}"`)}<span class="muted small">${grps ? grps + ' · ' : ''}Anlage frei</span></div>`;
+      if (st === 'X') return `<div class="wk-c wk-cell off${selCls}" data-selday="${dk}">${stateChip(st, `data-st="${dk}|${sh}"`)}<span class="muted small">${grps ? grps + ' · ' : ''}Anlage frei</span></div>`;
       const c = P.summary(dk, sh);
       const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
       const tone = c.missed ? 'late' : c.total && c.done === c.total ? 'done' : c.open ? 'due' : 'none';
-      return `<div class="wk-c wk-cell st-${st}${dk === today && sh === P.nowShift().sh ? ' now' : ''}">
+      return `<div class="wk-c wk-cell st-${st}${dk === today && sh === P.nowShift().sh ? ' now' : ''}${selCls}" data-selday="${dk}">
         <div class="wk-top">${stateChip(st, `data-st="${dk}|${sh}"`)}<button class="icon-btn sm" data-crew="${dk}|${sh}" aria-label="Personal einteilen">${icon('users')}</button></div>
         <div class="crew">${grps}${crew.length ? crewHtml(crew) : '<span class="txt-bad small">Kein Personal</span>'}${P.db.roster[P.slot(dk, sh)] ? '<span class="mod" title="Von Hand angepasst">✎</span>' : ''}</div>
         <button class="wk-open tone-${tone}" data-open="${dk}|${sh}">
@@ -101,6 +173,29 @@
       </div>`;
     }
 
+    /* day selection: click = only this day (again = off), Ctrl/Shift + click = add/remove */
+    const pick = (e, d) => {
+      let cur = (P.ui.weekSel || []).filter((x) => days.includes(x));
+      if (e.ctrlKey || e.metaKey || e.shiftKey) cur = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
+      else cur = cur.length === 1 && cur[0] === d ? [] : [d];
+      const first = !sel.length && cur.length;
+      P.ui.weekSel = cur;
+      P.render();
+      const dp = $('#daypanel');
+      if (first && dp) dp.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    $$('[data-selday]', main).forEach((el) => {
+      el.addEventListener('click', (e) => { if (e.target.closest('button, input, label')) return; pick(e, el.dataset.selday); });
+      if (el.classList.contains('wk-day')) el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e, el.dataset.selday); } });
+    });
+    const clr = $('#w-selclear'); if (clr) clr.onclick = () => { P.ui.weekSel = []; P.render(); };
+    $$('[data-dp]', main).forEach((c) => (c.onchange = () => {
+      const { i, d, sh } = dpItems[c.dataset.dp];
+      P.mutate(() => {
+        if (i.kind === 'rev') { if (c.checked) P.revDoneAll(i.t); else { i.t.checked = {}; i.t.doneAt = ''; } }
+        else P.toggleItem(i, c.checked, d, sh);
+      });
+    }));
     $('#w-prev').onclick = () => { P.ui.date = P.addDays(mon, -7); P.render(); };
     $('#w-next').onclick = () => { P.ui.date = P.addDays(mon, 7); P.render(); };
     $('#w-today').onclick = () => { P.ui.date = P.today(); P.render(); };
@@ -291,25 +386,7 @@
     $('#m-today').onclick = () => { P.ui.wDate = null; P.render(); };
     $('#m-add').onclick = () => P.editMaint();
     $$('[data-edit]', main).forEach((b) => (b.onclick = () => P.editMaint(P.db.maint.find((t) => t.id === b.dataset.edit))));
-    $$('[data-cell]', main).forEach((b) => (b.onclick = () => {
-      const it = cells[b.dataset.cell], t = it.t;
-      if (it.comp) {
-        P.pop(b, `<div class="pop-h">${esc(t.desc)}</div><div class="pop-b"><p>Erledigt am <b>${P.fmtDate(it.comp.date)}</b>${(it.comp.who || []).length ? ' von ' + it.comp.who.map((id) => esc(P.person(id)?.name || '')).join(', ') : ''}.</p><p class="muted small">Nächste Fälligkeit: KW ${P.isoWeek(P.nextDue(t)).w}</p></div><div class="pop-f"><button class="btn btn-ghost sm" data-undo>Rückgängig</button></div>`, (el) => {
-          el.querySelector('[data-undo]').onclick = () => P.mutate(() => P.uncompleteMaint(t, it.comp), 'Eintrag entfernt.', true);
-        });
-        return;
-      }
-      const early = P.dayNum(P.today()) < P.dayNum(it.week);
-      P.pop(b, `<div class="pop-h">${esc(t.desc)}</div><div class="pop-b">
-          <label class="fld"><span>Erledigt am</span><input type="date" id="pd-date" value="${P.today()}"></label>
-          <p class="muted small">${early ? `Geplant für KW ${P.isoWeek(it.week).w}. ` : ''}Der Zyklus (${P.cycleLabel(t)}) beginnt ab diesem Datum neu.</p></div>
-        <div class="pop-f"><button class="btn btn-primary sm" data-ok>${icon('check')}Als erledigt eintragen</button></div>`, (el) => {
-        el.querySelector('[data-ok]').onclick = () => {
-          const d = el.querySelector('#pd-date').value || P.today();
-          P.mutate(() => P.completeMaint(t, d, '', it.key), `Erledigt – nächste Fälligkeit KW ${P.isoWeek(P.cycleAdd(t, d)).w}.`, true);
-        };
-      });
-    }));
+    $$('[data-cell]', main).forEach((b) => (b.onclick = () => P.maintConfirm(b, cells[b.dataset.cell])));
   };
 
   /* ==================================================================== REVISION */
@@ -378,11 +455,11 @@
       const firstOp = days.find((d) => P.SHIFTS.some((x) => P.state(d, x.k) !== 'X')) || mon;
       for (const it of P.weekMaint(mon)) {
         const d = it.comp ? it.comp.date : it.t.weekday !== '' && it.t.weekday != null ? days[(Number(it.t.weekday) + 6) % 7] : (it.status === 'late' && P.monday(today) === mon ? (days.includes(today) ? today : firstOp) : firstOp);
-        (maintByDay[d] = maintByDay[d] || []).push([it, mon]);
+        (maintByDay[d] = maintByDay[d] || []).push([it, mon, d]);
       }
     }
     const maintChips = (d) => (maintByDay[d] || []).map(([it, mon]) => {
-      maintCells.push([it, mon]);
+      maintCells.push([it, mon, d]);
       const tip = `${it.t.comp}: ${it.t.desc} · ${it.status === 'done' ? 'erledigt ' + P.fmtShort(it.comp.date) : it.status === 'late' ? 'überfällig' : it.proj ? 'voraussichtlich fällig' : 'fällig'}${it.t.weekday ? '' : it.comp ? '' : ' (diese Woche, Tag frei wählbar)'}`;
       return `<button class="mchip st-${it.status}${it.proj ? ' proj' : ''}" data-mc="${maintCells.length - 1}" title="${esc(tip)}">${it.status === 'done' ? icon('check') : icon('wrench')}<span>${esc(it.t.desc)}</span></button>`;
     }).join('');
@@ -426,7 +503,7 @@
     $$('[data-day]', main).forEach((b) => (b.onclick = () => P.go('woche', { date: b.dataset.day })));
     $$('[data-week]', main).forEach((b) => (b.onclick = () => P.go('woche', { date: b.dataset.week })));
     $$('[data-rev]', main).forEach((b) => (b.onclick = () => { P.ui.revFocus = b.dataset.rev; P.go('revision'); }));
-    $$('[data-mc]', main).forEach((b) => (b.onclick = () => { P.ui.wDate = maintCells[b.dataset.mc][1]; P.go('wartung'); }));
+    $$('[data-mc]', main).forEach((b) => (b.onclick = () => { const [it, , d] = maintCells[b.dataset.mc]; P.maintConfirm(b, it, { date: d }); }));
   };
 
   /* ==================================================================== TEAM */
